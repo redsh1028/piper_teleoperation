@@ -33,6 +33,7 @@ setup(
             'quest2ros_adapter = vr_udp_bridge.quest2ros_adapter:main',
             'vr_dual_arm_teleop = vr_udp_bridge.vr_dual_arm_teleop:main',
             'vr_piper_anchor_teleop = vr_udp_bridge.vr_piper_anchor_teleop:main',
+            'vr_piper_joint_ik_axis_gripper_teleop = vr_udp_bridge.vr_piper_joint_ik_axis_gripper_teleop:main',
             'vr_piper_joint_ik_teleop = vr_udp_bridge.vr_piper_joint_ik_teleop:main',
             'vr_piper_controller_base = vr_udp_bridge.vr_piper_controller_base:main',
             'vr_piper_controller_ee = vr_udp_bridge.vr_piper_controller_ee:main',

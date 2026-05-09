@@ -232,8 +232,8 @@ class C_PiperRosNode(Node):
                 self.piper.EndPoseCtrl(*self.position_state)
 
                 gripper = round(pos_data.gripper * 1000 * 1000)
-                if pos_data.gripper > 70000:
-                    gripper = 70000
+                if pos_data.gripper > 100000:
+                    gripper = 100000
                 if pos_data.gripper < 0:
                     gripper = 0
                 if self.gripper_exist:
@@ -258,7 +258,7 @@ class C_PiperRosNode(Node):
             joint_data.position = list(joint_data.position) + [0.0]
         
         gripper = round(joint_data.position[6] * 1000 * 1000)
-        gripper = clip(gripper, 0, 70000)
+        gripper = clip(gripper, 0, 100000)
 
         if self.GetEnableFlag():
             if joint_data.velocity != []:
@@ -340,7 +340,7 @@ class C_PiperRosNode(Node):
         else:
             if self.debug:
                 self.get_logger().info("Open the gripper...")
-            self.gripper_max = 70 * 1000 * 1000
+            self.gripper_max = 100 * 1000 * 1000
             self.piper.MotionCtrl_2(0x01, self.piper.GetArmStatus().arm_status.mode_feed, 100)
             self.piper.GripperCtrl(self.gripper_max, 1000, 0x01, 0)
 
