@@ -52,8 +52,9 @@ def generate_launch_description():
             DeclareLaunchArgument("gripper_smoothing_alpha", default_value="0.35"),
             DeclareLaunchArgument("gripper_full_open_button_index", default_value="1"),
             DeclareLaunchArgument("gripper_effort", default_value="2.0"),
-            DeclareLaunchArgument("estop_button_index", default_value="2"),
-            DeclareLaunchArgument("estop_hold_both_arms", default_value="true"),
+            DeclareLaunchArgument("home_button_index", default_value="2"),
+            DeclareLaunchArgument("home_both_arms", default_value="true"),
+            DeclareLaunchArgument("home_max_step_rad", default_value="0.03"),
             IncludeLaunchDescription(
                 piper_launch,
                 launch_arguments={
@@ -147,11 +148,12 @@ def generate_launch_description():
                             "gripper_full_open_button_index"
                         ),
                         "gripper_effort": LaunchConfiguration("gripper_effort"),
-                        "estop_button_index": LaunchConfiguration(
-                            "estop_button_index"
+                        "home_button_index": LaunchConfiguration(
+                            "home_button_index"
                         ),
-                        "estop_hold_both_arms": LaunchConfiguration(
-                            "estop_hold_both_arms"
+                        "home_both_arms": LaunchConfiguration("home_both_arms"),
+                        "home_max_step_rad": LaunchConfiguration(
+                            "home_max_step_rad"
                         ),
                     }
                 ],

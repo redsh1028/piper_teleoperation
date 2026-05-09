@@ -25,8 +25,9 @@ class VrPiperJointIkAxisGripperTeleop(VrPiperJointIkTeleop):
         self.declare_parameter("gripper_smoothing_alpha", 0.35)
         self.declare_parameter("gripper_full_open_button_index", 1)
         self.declare_parameter("gripper_effort", 2.0)
-        self.declare_parameter("estop_button_index", 2)
-        self.declare_parameter("estop_hold_both_arms", True)
+        self.declare_parameter("home_button_index", 2)
+        self.declare_parameter("home_both_arms", True)
+        self.declare_parameter("home_max_step_rad", 0.03)
 
         self.gripper_axis_index = int(
             self.get_parameter("gripper_axis_index").value
@@ -56,11 +57,9 @@ class VrPiperJointIkAxisGripperTeleop(VrPiperJointIkTeleop):
             self.get_parameter("gripper_full_open_button_index").value
         )
         self.gripper_effort = float(self.get_parameter("gripper_effort").value)
-        self.estop_button_index = int(self.get_parameter("estop_button_index").value)
-        self.estop_hold_both_arms = parse_bool(
-            self.get_parameter("estop_hold_both_arms").value
-        )
-        self.estop_active = False
+        self.home_button_index = int(self.get_parameter("home_button_index").value)
+        self.home_both_arms = parse_bool(self.get_parameter("home_both_arms").value)
+        self.home_max_step_rad = float(self.get_parameter("home_max_step_rad").value)
 
         self._validate_axis_gripper_parameters()
         self.get_logger().info(
@@ -91,23 +90,33 @@ class VrPiperJointIkAxisGripperTeleop(VrPiperJointIkTeleop):
             raise ValueError("gripper_full_open_button_index must be -1 or greater")
         if self.gripper_effort <= 0.0:
             raise ValueError("gripper_effort must be greater than zero")
-        if self.estop_button_index < -1:
-            raise ValueError("estop_button_index must be -1 or greater")
+        if self.home_button_index < -1:
+            raise ValueError("home_button_index must be -1 or greater")
+        if self.home_max_step_rad <= 0.0:
+            raise ValueError("home_max_step_rad must be greater than zero")
 
     def _on_joy(self, side: str, msg) -> None:
         super()._on_joy(side, msg)
         arm = self.arms[side]
-        if self._estop_button_pressed(arm):
-            self._trigger_estop(side)
+        pressed = self._home_button_pressed(arm)
+        arm.home_button_down = pressed
+        if self.home_both_arms:
+            home_active = any(
+                bool(getattr(self.arms[arm_side], "home_button_down", False))
+                for arm_side in ("left", "right")
+            )
+        else:
+            home_active = pressed
+        self._set_home_active(side, home_active)
 
     def _handle_arm(self, side: str, joint_pub, gripper_pub, now: float) -> None:
         arm = self.arms[side]
 
-        if self.estop_active:
+        if getattr(arm, "home_active", False):
             arm.vr_anchor = None
             arm.robot_anchor = None
             arm.enabled_last_cycle = False
-            self._publish_estop_hold(arm, joint_pub)
+            self._publish_home_step(arm, joint_pub)
             return
 
         if not self._enabled(arm) or not self._input_ready(arm, now):
@@ -167,19 +176,6 @@ class VrPiperJointIkAxisGripperTeleop(VrPiperJointIkTeleop):
         joints = arm.current_joints.copy()
         joint_pub.publish(self._joint_command_msg(joints, self._gripper_position(arm)))
 
-    def _publish_estop_hold(self, arm, joint_pub) -> None:
-        hold_joints = getattr(arm, "estop_hold_joints", None)
-        if hold_joints is None:
-            return
-        hold_gripper = float(
-            getattr(
-                arm,
-                "estop_hold_gripper",
-                getattr(arm, "command_gripper", arm.current_gripper),
-            )
-        )
-        joint_pub.publish(self._joint_command_msg(hold_joints, hold_gripper))
-
     def _gripper_position(self, arm) -> float:
         previous = float(getattr(arm, "command_gripper", arm.current_gripper))
 
@@ -234,51 +230,73 @@ class VrPiperJointIkAxisGripperTeleop(VrPiperJointIkTeleop):
             return False
         return int(arm.joy.buttons[self.gripper_full_open_button_index]) == 1
 
-    def _estop_button_pressed(self, arm) -> bool:
-        if self.estop_button_index < 0:
+    def _home_button_pressed(self, arm) -> bool:
+        if self.home_button_index < 0:
             return False
         if arm.joy is None:
             return False
-        if self.estop_button_index >= len(arm.joy.buttons):
+        if self.home_button_index >= len(arm.joy.buttons):
             self._warn_throttled(
-                f"{arm.name}_bad_estop_button",
-                "estop_button_index %d is outside %s Joy.buttons"
-                % (self.estop_button_index, arm.name),
+                f"{arm.name}_bad_home_button",
+                "home_button_index %d is outside %s Joy.buttons"
+                % (self.home_button_index, arm.name),
             )
             return False
-        return int(arm.joy.buttons[self.estop_button_index]) == 1
+        return int(arm.joy.buttons[self.home_button_index]) == 1
 
-    def _trigger_estop(self, side: str) -> None:
-        if self.estop_active:
+    def _set_home_active(self, side: str, active: bool) -> None:
+        targets = ("left", "right") if self.home_both_arms else (side,)
+        for target in targets:
+            arm = self.arms[target]
+            was_active = getattr(arm, "home_active", False)
+            arm.home_active = active
+            if active:
+                self._reset_teleop_state(target)
+            elif was_active:
+                self._reset_teleop_state(target)
+
+        if active and not getattr(self.arms[side], "home_button_last", False):
+            self.get_logger().warn(
+                "%s controller home button pressed; moving %s Piper arm%s toward home"
+                % (
+                    side,
+                    "both" if self.home_both_arms else side,
+                    "s" if self.home_both_arms else "",
+                )
+            )
+        elif not active and getattr(self.arms[side], "home_button_last", False):
+            self.get_logger().warn(
+                "%s controller home button released; stopping home motion" % side
+            )
+        self.arms[side].home_button_last = active
+
+    def _publish_home_step(self, arm, joint_pub) -> None:
+        if arm.current_joints is None:
+            self._warn_throttled(
+                f"{arm.name}_missing_home_joint_state",
+                f"{arm.name} joint_states_single is missing; home command is not published",
+            )
             return
-        self.estop_active = True
-        hold_sides = ("left", "right") if self.estop_hold_both_arms else (side,)
-        missing = []
-        for hold_side in hold_sides:
-            arm = self.arms[hold_side]
-            if arm.current_joints is None:
-                missing.append(hold_side)
-                continue
-            arm.estop_hold_joints = arm.current_joints.copy()
-            arm.estop_hold_gripper = float(
-                getattr(arm, "command_gripper", arm.current_gripper)
+
+        target = [0.0] * len(arm.current_joints)
+        command = arm.current_joints.copy()
+        for idx, value in enumerate(command):
+            delta = target[idx] - float(value)
+            command[idx] = float(value) + clamp(
+                delta,
+                -self.home_max_step_rad,
+                self.home_max_step_rad,
             )
-            arm.vr_anchor = None
-            arm.robot_anchor = None
-            arm.enabled_last_cycle = False
-        if missing:
-            self.get_logger().error(
-                "%s controller e-stop pressed; missing joint feedback for %s"
-                % (side, ", ".join(missing))
-            )
-        self.get_logger().error(
-            "%s controller e-stop pressed; holding %s Piper arm%s in place"
-            % (
-                side,
-                "both" if self.estop_hold_both_arms else side,
-                "s" if self.estop_hold_both_arms else "",
-            )
-        )
+
+        arm.command_joints = command.copy()
+        joint_pub.publish(self._joint_command_msg(command, arm.current_gripper))
+
+    def _reset_teleop_state(self, side: str) -> None:
+        arm = self.arms[side]
+        arm.vr_anchor = None
+        arm.robot_anchor = None
+        arm.enabled_last_cycle = False
+        arm.command_joints = None
 
 
 def main(args=None) -> None:

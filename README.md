@@ -148,8 +148,9 @@ gripper_max_step_m=0.006
 gripper_smoothing_alpha=0.35
 gripper_full_open_button_index=1
 gripper_effort=2.0
-estop_button_index=2
-estop_hold_both_arms=true
+home_button_index=2
+home_both_arms=true
+home_max_step_rad=0.03
 ```
 
 처음 실제 로봇에서 확인할 때는 더 보수적인 값으로 시작하는 것을 권장합니다.
@@ -188,13 +189,12 @@ ros2 launch vr_udp_bridge vr_piper_joint_ik_axis_gripper_teleop.launch.py \
 
 그리퍼만 제어할 때 `joint1~joint6`은 마지막 명령이 아니라 최신 `/joint_states_single` 피드백 값을 사용합니다. 그래서 그리퍼 명령이 이전 팔 자세로 로봇을 되돌리는 일을 줄입니다.
 
-E-stop:
+Home 버튼:
 
-- `estop_button_index:=2` 버튼을 누르면 그 순간의 `/joint_states_single` 값을 hold target으로 저장합니다.
-- e-stop이 한번 들어가면 teleop 노드는 latch 상태가 되어 VR pose/그리퍼 입력을 무시하고 hold joint command만 계속 publish합니다.
-- 기본값은 `estop_hold_both_arms:=true`라서 어느 컨트롤러에서 눌러도 양쪽 Piper가 그 자리에서 멈춰 자세를 유지합니다.
-- 이 기능은 모터 disable이 아니므로 관절 토크가 풀리지 않습니다.
-- 다시 제어하려면 launch를 재시작합니다.
+- `home_button_index:=2` 버튼을 누르고 있는 동안 현재 피드백 joint 자세에서 홈 자세 `[0, 0, 0, 0, 0, 0]` 방향으로 이동합니다.
+- 버튼을 떼면 홈 이동을 중단하고, 그 순간의 현재 피드백 자세 기준으로 멈춥니다.
+- 기본값은 `home_both_arms:=true`라서 어느 컨트롤러에서 눌러도 양쪽 Piper가 홈 방향으로 이동합니다.
+- 홈 이동 중에는 VR pose 제어 anchor를 리셋하므로, 다시 조작하려면 enable 버튼을 새로 눌러 현재 위치에서 anchor를 다시 잡습니다.
 
 ## 좌표계
 
@@ -243,8 +243,9 @@ ros2 launch vr_udp_bridge vr_piper_joint_ik_axis_gripper_teleop.launch.py \
 - `gripper_closed_position_m`: 완전 닫힘 위치입니다.
 - `gripper_full_open_button_index`: 완전 열림 버튼입니다. 끄려면 `-1`입니다.
 - `gripper_effort`: 그리퍼 힘입니다. Piper 쪽에서 보통 `0.5~3.0` 범위로 사용합니다.
-- `estop_button_index`: e-stop으로 사용할 joy button index입니다. 끄려면 `-1`입니다.
-- `estop_hold_both_arms`: true이면 한쪽 컨트롤러 e-stop으로 양쪽 Piper가 현재 joint 자세를 유지합니다.
+- `home_button_index`: 홈 이동에 사용할 joy button index입니다. 끄려면 `-1`입니다.
+- `home_both_arms`: true이면 한쪽 컨트롤러 home 버튼으로 양쪽 Piper가 홈 방향으로 이동합니다.
+- `home_max_step_rad`: 한 publish 주기당 홈 방향으로 이동할 최대 joint step입니다.
 
 그리퍼를 더 천천히:
 
@@ -276,16 +277,22 @@ gripper_axis_deadzone:=0.05
 gripper_full_open_button_index:=-1
 ```
 
-E-stop 버튼을 바꾸려면:
+Home 버튼을 바꾸려면:
 
 ```bash
-estop_button_index:=7
+home_button_index:=7
 ```
 
-E-stop 기능을 끄려면:
+Home 버튼 기능을 끄려면:
 
 ```bash
-estop_button_index:=-1
+home_button_index:=-1
+```
+
+홈 이동을 더 느리게 하려면:
+
+```bash
+home_max_step_rad:=0.01
 ```
 
 ## 토픽 확인
