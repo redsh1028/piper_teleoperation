@@ -19,6 +19,7 @@ Piper arm 2대를 VR 컨트롤러로 텔레오퍼레이션하기 위한 ROS2 Hum
 ```text
 tele_ws/
 ├── send_openvr_udp.py
+├── send_realsense_udp.py
 ├── can_config.sh
 ├── find_all_can_port.sh
 └── src/
@@ -33,6 +34,7 @@ tele_ws/
 ```
 
 - `send_openvr_udp.py`: SteamVR/OpenVR 컨트롤러 정보를 UDP로 송신합니다.
+- `send_realsense_udp.py`: RealSense color/depth 이미지를 UDP chunk로 송신합니다.
 - `udp_to_pose.py`: UDP JSON을 `/vr/.../pose`, `/vr/.../joy`, `/vr/.../status` 토픽으로 변환합니다.
 - `vr_piper_joint_ik_axis_gripper_teleop.py`: 메인 teleop 노드입니다.
 - `vr_piper_joint_ik_axis_gripper_teleop.launch.py`: 메인 launch 파일입니다.
@@ -55,6 +57,12 @@ pip3 install -r requirements.txt
 ```
 
 직접 IK 노드는 `numpy`, `scipy`, `urdf_parser_py`, `PyYAML`을 사용합니다.
+
+LeRobotDataset 기록 기능을 사용하려면 LeRobot도 설치합니다.
+
+```bash
+pip3 install lerobot
+```
 
 ## CAN 설정
 
@@ -117,6 +125,142 @@ buttons:
 ```
 
 여기서 `axes[1]`은 그리퍼 analog 제어에 사용되고, `buttons[1]`은 그리퍼 완전 열림 버튼으로 사용됩니다.
+
+## RealSense 이미지 UDP 송신
+
+`send_realsense_udp.py`는 RealSense color/depth frame을 압축한 뒤 UDP chunk로 나눠 전송합니다. color 이미지는 JPEG, depth 원본은 16-bit PNG로 보냅니다.
+
+카메라 serial 확인:
+
+```bash
+python3 - <<'PY'
+import pyrealsense2 as rs
+for dev in rs.context().query_devices():
+    print(dev.get_info(rs.camera_info.name), dev.get_info(rs.camera_info.serial_number))
+PY
+```
+
+Color stream 송신:
+
+```bash
+python3 send_realsense_udp.py \
+  --host <RECEIVER_IP> \
+  --port 5020 \
+  --backend realsense \
+  --serial 139522076807 \
+  --stream color \
+  --width 640 \
+  --height 480 \
+  --fps 30 \
+  --jpeg-quality 80
+```
+
+Depth stream을 시각화 JPEG로 송신:
+
+```bash
+python3 send_realsense_udp.py \
+  --host <RECEIVER_IP> \
+  --port 5020 \
+  --backend realsense \
+  --serial 139522076807 \
+  --stream depth \
+  --depth-visualize
+```
+
+Color와 depth를 모두 송신:
+
+```bash
+python3 send_realsense_udp.py \
+  --host <RECEIVER_IP> \
+  --port 5020 \
+  --backend realsense \
+  --serial 139522076807 \
+  --stream both
+```
+
+3대 카메라 동시 송신:
+
+```bash
+./send_three_realsense_udp.sh --host <ROS_PC_IP>
+```
+
+기본 매핑:
+
+```text
+main        serial=139522076807 port=5020
+left_wrist  serial=116622072176 port=5021
+right_wrist serial=134322071792 port=5022
+```
+
+각 UDP packet은 `JSON header + newline + binary payload` 형식입니다. header에는 `magic=RSIMG1`, `frame_id`, `timestamp`, `stream`, `encoding`, `width`, `height`, `chunk_index`, `chunk_count`, `total_size`가 들어갑니다. 수신 측은 같은 `frame_id`와 `stream`의 chunk를 모두 모아 이미지 bytes를 복원하면 됩니다.
+
+## LeRobotDataset 기록
+
+`lerobot_piper_recorder`는 main/left wrist/right wrist D435 RGB UDP 이미지와 ROS2 Piper/VR 토픽을 받아 LeRobotDataset v3 형식으로 저장합니다.
+
+저장 feature:
+
+```text
+observation.images.main        : main D435 RGB image
+observation.images.left_wrist  : left wrist RGB image
+observation.images.right_wrist : right wrist RGB image
+observation.state              : left joint1~7 + right joint1~7 feedback
+action                         : left joint1~7 + right joint1~7 command
+observation.ee_pose            : left/right EE pose [x,y,z,qx,qy,qz,qw]
+observation.vr_pose            : left/right VR controller pose [x,y,z,qx,qy,qz,qw]
+observation.vr_joy             : left/right axes[0:10] + buttons[0:10]
+```
+
+1. D435 3대 이미지 송신:
+
+```bash
+./send_three_realsense_udp.sh --host <ROS_PC_IP>
+```
+
+2. Piper teleop 실행:
+
+```bash
+ros2 launch vr_udp_bridge vr_piper_joint_ik_axis_gripper_teleop.launch.py \
+  left_can_port:=can0 \
+  right_can_port:=can1 \
+  debug_axis:=true
+```
+
+3. recorder 실행:
+
+키보드 `s/e/q` 입력이 필요하므로 `ros2 run` 실행을 권장합니다.
+
+```bash
+ros2 run vr_udp_bridge lerobot_piper_recorder --ros-args \
+  -p repo_id:=local/piper_teleoperation \
+  -p root:=~/lerobot_datasets/piper_teleoperation_3cam \
+  -p fps:=30 \
+  -p main_image_port:=5020 \
+  -p left_wrist_image_port:=5021 \
+  -p right_wrist_image_port:=5022 \
+  -p task:="teleoperate dual Piper arms"
+```
+
+키보드:
+
+```text
+s : 새 episode 기록 시작
+e : 현재 episode 저장
+q : 저장하지 않은 진행 중 episode를 버리고 종료
+```
+
+launch로 파라미터를 확인하거나 실행할 수도 있습니다.
+
+```bash
+ros2 launch vr_udp_bridge record_piper_lerobot_dataset.launch.py \
+  repo_id:=local/piper_teleoperation \
+  root:=~/lerobot_datasets/piper_teleoperation_3cam \
+  main_image_port:=5020 \
+  left_wrist_image_port:=5021 \
+  right_wrist_image_port:=5022
+```
+
+단, `ros2 launch`로 실행하면 환경에 따라 stdin이 recorder 노드에 연결되지 않아 `s/e/q`가 동작하지 않을 수 있습니다.
 
 ## 메인 실행
 

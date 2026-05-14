@@ -31,6 +31,7 @@ setup(
         'console_scripts': [
             'udp_to_pose = vr_udp_bridge.udp_to_pose:main',
             'quest2ros_adapter = vr_udp_bridge.quest2ros_adapter:main',
+            'lerobot_piper_recorder = vr_udp_bridge.lerobot_piper_recorder:main',
             'vr_dual_arm_teleop = vr_udp_bridge.vr_dual_arm_teleop:main',
             'vr_piper_anchor_teleop = vr_udp_bridge.vr_piper_anchor_teleop:main',
             'vr_piper_joint_ik_axis_gripper_teleop = vr_udp_bridge.vr_piper_joint_ik_axis_gripper_teleop:main',

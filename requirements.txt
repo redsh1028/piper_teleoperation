@@ -1,4 +1,6 @@
 python-can
 piper_sdk
 scipy
-
+numpy<2
+opencv-python
+pyrealsense2

@@ -53,7 +53,7 @@ def generate_launch_description():
             DeclareLaunchArgument("gripper_full_open_button_index", default_value="1"),
             DeclareLaunchArgument("gripper_effort", default_value="2.0"),
             DeclareLaunchArgument("home_button_index", default_value="2"),
-            DeclareLaunchArgument("home_both_arms", default_value="true"),
+            DeclareLaunchArgument("home_both_arms", default_value="false"),
             DeclareLaunchArgument("home_max_step_rad", default_value="0.03"),
             IncludeLaunchDescription(
                 piper_launch,
