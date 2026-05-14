@@ -196,7 +196,7 @@ right_wrist serial=134322071792 port=5022
 
 ## LeRobotDataset 기록
 
-`lerobot_piper_recorder`는 main/left wrist/right wrist D435 RGB UDP 이미지와 ROS2 Piper/VR 토픽을 받아 LeRobotDataset v3 형식으로 저장합니다.
+`lerobot_piper_recorder`는 main/left wrist/right wrist D435 RGB UDP 이미지와 ROS2 Piper/VR 토픽을 받아 LeRobotDataset v3 형식으로 저장합니다. 현재 기본 저장 방식은 MP4 video dataset입니다. 즉 이미지가 `data/*.parquet` 안에 직접 박히는 방식이 아니라, `videos/` 아래 카메라별 MP4로 저장됩니다.
 
 저장 feature:
 
@@ -210,6 +210,35 @@ observation.ee_pose            : left/right EE pose [x,y,z,qx,qy,qz,qw]
 observation.vr_pose            : left/right VR controller pose [x,y,z,qx,qy,qz,qw]
 observation.vr_joy             : left/right axes[0:10] + buttons[0:10]
 ```
+
+저장 구조 예:
+
+```text
+dataset_root/
+├── meta/
+│   ├── info.json
+│   ├── stats.json
+│   ├── tasks.parquet
+│   ├── episode_metadata.jsonl
+│   └── episodes/
+│       └── chunk-000/
+│           └── file-000.parquet
+├── data/
+│   └── chunk-000/
+│       └── file-000.parquet
+└── videos/
+    ├── observation.images.main/
+    │   └── chunk-000/
+    │       └── file-000.mp4
+    ├── observation.images.left_wrist/
+    │   └── chunk-000/
+    │       └── file-000.mp4
+    └── observation.images.right_wrist/
+        └── chunk-000/
+            └── file-000.mp4
+```
+
+`data/*.parquet`에는 state/action/pose/timestamp와 video index가 저장되고, 실제 RGB frame은 `videos/.../*.mp4`에 저장됩니다. `images/` 폴더가 비어 있어도 정상입니다.
 
 1. D435 3대 이미지 송신:
 
@@ -232,13 +261,19 @@ ros2 launch vr_udp_bridge vr_piper_joint_ik_axis_gripper_teleop.launch.py \
 
 ```bash
 ros2 run vr_udp_bridge lerobot_piper_recorder --ros-args \
-  -p repo_id:=local/piper_teleoperation \
-  -p root:=~/lerobot_datasets/piper_teleoperation_3cam \
-  -p fps:=30 \
+  -p repo_id:=local/piper_teleoperation_video \
+  -p root:=~/lerobot_datasets/piper_teleoperation_3cam_video \
+  -p fps:=15 \
   -p main_image_port:=5020 \
   -p left_wrist_image_port:=5021 \
   -p right_wrist_image_port:=5022 \
-  -p task:="teleoperate dual Piper arms"
+  -p use_videos:=true \
+  -p vcodec:=h264 \
+  -p task:="put object in box" \
+  -p object_name:="bottle" \
+  -p box_position:="center" \
+  -p start_position:="left" \
+  -p success:=true
 ```
 
 키보드:
@@ -249,15 +284,115 @@ e : 현재 episode 저장
 q : 저장하지 않은 진행 중 episode를 버리고 종료
 ```
 
+권장 주기:
+
+```text
+VR / robot control loop : 50~100 Hz
+camera capture/send     : 30 FPS
+LeRobot record          : 15 Hz
+training sample rate    : 15 Hz
+```
+
+제어 주기와 데이터셋 저장 FPS는 분리합니다. 로봇 제어는 부드럽게 유지하고, 학습 데이터는 15Hz 정도로 줄여 크기와 학습 부담을 낮춥니다.
+
+Episode metadata는 `meta/episode_metadata.jsonl`에 별도 저장됩니다. 예:
+
+```json
+{"task":"put object in box","object_name":"bottle","box_position":"center","start_position":"left","success":true}
+```
+
+저장 확인:
+
+```bash
+find ~/lerobot_datasets/piper_teleoperation_3cam_video/videos -type f
+cat ~/lerobot_datasets/piper_teleoperation_3cam_video/meta/episode_metadata.jsonl
+```
+
+FPS 확인:
+
+```bash
+python3 - <<'PY'
+import pyarrow.parquet as pq
+
+path = "/home/yumin/lerobot_datasets/piper_teleoperation_3cam_video/data/chunk-000/file-000.parquet"
+t = pq.read_table(path, columns=["timestamp"])
+ts = t["timestamp"].to_pylist()
+dts = [b - a for a, b in zip(ts[:-1], ts[1:])]
+print("frames:", len(ts))
+print("duration:", ts[-1] - ts[0])
+print("avg fps:", 1.0 / (sum(dts) / len(dts)))
+print("dt min/max:", min(dts), max(dts))
+PY
+```
+
+LeRobotDataset 로드:
+
+현재 환경에서는 기본 `torchcodec` video backend가 실패할 수 있으므로 `video_backend="pyav"`를 명시합니다.
+
+```python
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+dataset = LeRobotDataset(
+    repo_id="local/piper_teleoperation_video",
+    root="/home/yumin/lerobot_datasets/piper_teleoperation_3cam_video",
+    video_backend="pyav",
+)
+
+sample = dataset[0]
+print(sample["observation.images.main"].shape)
+print(sample["observation.images.left_wrist"].shape)
+print(sample["observation.images.right_wrist"].shape)
+print(sample["observation.state"].shape)
+print(sample["action"].shape)
+```
+
+정상 shape 예:
+
+```text
+observation.images.main        torch.Size([3, 480, 640])
+observation.images.left_wrist  torch.Size([3, 480, 640])
+observation.images.right_wrist torch.Size([3, 480, 640])
+observation.state              torch.Size([14])
+action                         torch.Size([14])
+```
+
+TorchCodec backend 실패 원인:
+
+- TorchCodec이 필요한 FFmpeg shared library를 찾지 못할 수 있습니다.
+- 예: `libavutil.so.60`, `libavutil.so.59`, `libavutil.so.58`, `libavutil.so.57`, `libavdevice.so.58` 누락.
+- PyTorch와 TorchCodec wheel 버전이 맞지 않을 수 있습니다.
+- 현재 확인된 안정 로드는 `video_backend="pyav"`입니다.
+
+확인 명령:
+
+```bash
+python3 - <<'PY'
+import torch
+import torchcodec
+print("torch:", torch.__version__)
+print("torchcodec:", torchcodec.__version__)
+PY
+
+ldconfig -p | grep libav
+```
+
 launch로 파라미터를 확인하거나 실행할 수도 있습니다.
 
 ```bash
 ros2 launch vr_udp_bridge record_piper_lerobot_dataset.launch.py \
-  repo_id:=local/piper_teleoperation \
-  root:=~/lerobot_datasets/piper_teleoperation_3cam \
+  repo_id:=local/piper_teleoperation_video \
+  root:=~/lerobot_datasets/piper_teleoperation_3cam_video \
+  fps:=15 \
   main_image_port:=5020 \
   left_wrist_image_port:=5021 \
-  right_wrist_image_port:=5022
+  right_wrist_image_port:=5022 \
+  use_videos:=true \
+  vcodec:=h264 \
+  task:="put object in box" \
+  object_name:=bottle \
+  box_position:=center \
+  start_position:=left \
+  success:=true
 ```
 
 단, `ros2 launch`로 실행하면 환경에 따라 stdin이 recorder 노드에 연결되지 않아 `s/e/q`가 동작하지 않을 수 있습니다.

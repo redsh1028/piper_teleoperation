@@ -336,6 +336,7 @@ class LeRobotPiperRecorder(Node):
         self.declare_parameter("note", "")
         self.declare_parameter("robot_type", "piper_dual_vr")
         self.declare_parameter("use_videos", True)
+        self.declare_parameter("vcodec", "h264")
         self.declare_parameter("recv_buffer", 4 * 1024 * 1024)
         self.declare_parameter("max_datagram_size", 65535)
         self.declare_parameter("frame_timeout", 1.0)
@@ -378,6 +379,7 @@ class LeRobotPiperRecorder(Node):
         self.note = str(self.get_parameter("note").value)
         self.robot_type = str(self.get_parameter("robot_type").value)
         self.use_videos = parse_bool(self.get_parameter("use_videos").value)
+        self.vcodec = str(self.get_parameter("vcodec").value)
         self.recv_buffer = int(self.get_parameter("recv_buffer").value)
         self.max_datagram_size = int(self.get_parameter("max_datagram_size").value)
         self.frame_timeout = float(self.get_parameter("frame_timeout").value)
@@ -410,15 +412,21 @@ class LeRobotPiperRecorder(Node):
             root=self.root,
             robot_type=self.robot_type,
             use_videos=self.use_videos,
+            vcodec=self.vcodec,
         )
 
     def _dataset_complete(self) -> bool:
         required = [
             self.root / "meta" / "info.json",
             self.root / "meta" / "tasks.parquet",
-            self.root / "meta" / "episodes.parquet",
         ]
         if not all(path.exists() for path in required):
+            return False
+        episodes_dir = self.root / "meta" / "episodes"
+        legacy_episodes = self.root / "meta" / "episodes.parquet"
+        if not legacy_episodes.exists() and not any(
+            episodes_dir.glob("chunk-*/*.parquet")
+        ):
             return False
         try:
             with open(self.root / "meta" / "info.json", "r", encoding="utf-8") as f:
@@ -426,6 +434,14 @@ class LeRobotPiperRecorder(Node):
         except (OSError, json.JSONDecodeError):
             return False
         features = info.get("features", {})
+        expected_image_dtype = "video" if self.use_videos else "image"
+        for key in (
+            "observation.images.main",
+            "observation.images.left_wrist",
+            "observation.images.right_wrist",
+        ):
+            if features.get(key, {}).get("dtype") != expected_image_dtype:
+                return False
         return all(
             key in features
             for key in (
@@ -450,6 +466,7 @@ class LeRobotPiperRecorder(Node):
         return backup
 
     def _features(self) -> Dict[str, dict]:
+        image_dtype = "video" if self.use_videos else "image"
         joint_names = [
             "left_joint1",
             "left_joint2",
@@ -490,17 +507,17 @@ class LeRobotPiperRecorder(Node):
         )
         return {
             "observation.images.main": {
-                "dtype": "image",
+                "dtype": image_dtype,
                 "shape": (*self.camera_shapes["main"], 3),
                 "names": ["height", "width", "channel"],
             },
             "observation.images.left_wrist": {
-                "dtype": "image",
+                "dtype": image_dtype,
                 "shape": (*self.camera_shapes["left_wrist"], 3),
                 "names": ["height", "width", "channel"],
             },
             "observation.images.right_wrist": {
-                "dtype": "image",
+                "dtype": image_dtype,
                 "shape": (*self.camera_shapes["right_wrist"], 3),
                 "names": ["height", "width", "channel"],
             },

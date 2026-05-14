@@ -37,6 +37,7 @@ def generate_launch_description():
             DeclareLaunchArgument("note", default_value=""),
             DeclareLaunchArgument("robot_type", default_value="piper_dual_vr"),
             DeclareLaunchArgument("use_videos", default_value="true"),
+            DeclareLaunchArgument("vcodec", default_value="h264"),
             DeclareLaunchArgument("recv_buffer", default_value="4194304"),
             DeclareLaunchArgument("max_datagram_size", default_value="65535"),
             DeclareLaunchArgument("frame_timeout", default_value="1.0"),
@@ -86,6 +87,7 @@ def generate_launch_description():
                         "note": LaunchConfiguration("note"),
                         "robot_type": LaunchConfiguration("robot_type"),
                         "use_videos": LaunchConfiguration("use_videos"),
+                        "vcodec": LaunchConfiguration("vcodec"),
                         "recv_buffer": LaunchConfiguration("recv_buffer"),
                         "max_datagram_size": LaunchConfiguration(
                             "max_datagram_size"
