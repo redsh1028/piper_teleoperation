@@ -1,0 +1,2 @@
+# USB CAN 장치 연결 시, 자동으로 CAN 인터페이스를 활성화
+ACTION=="add", SUBSYSTEM=="net", KERNEL=="can[0-9]*", RUN+="/usr/sbin/ip link set $env{INTERFACE} up type can bitrate 1000000"

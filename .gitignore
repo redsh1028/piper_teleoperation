@@ -1,0 +1,15 @@
+build/
+install/
+log/
+__pycache__/
+*.pyc
+*.pyo
+*.bag
+*.db3
+*.mp4
+*.avi
+*.mkv
+*.log
+.DS_Store
+.vscode/
+.idea/

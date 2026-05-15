@@ -1,0 +1,7 @@
+python-can
+scipy
+numpy<2
+opencv-python
+pyrealsense2
+lerobot
+av
