@@ -93,8 +93,7 @@ start_camera() {
     --fps "$FPS" \
     --jpeg-quality "$JPEG_QUALITY" \
     "--$([ "$COLOR_AUTO_EXPOSURE" = "true" ] && echo color-auto-exposure || echo no-color-auto-exposure)" \
-    --color-exposure "$COLOR_EXPOSURE" \
-    --color-gain "$COLOR_GAIN" &
+    $([ "$COLOR_AUTO_EXPOSURE" = "true" ] || printf '%s ' --color-exposure "$COLOR_EXPOSURE" --color-gain "$COLOR_GAIN") &
   PIDS+=("$!")
 }
 

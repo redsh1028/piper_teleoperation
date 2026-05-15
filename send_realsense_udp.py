@@ -248,17 +248,18 @@ def configure_realsense_color_options(profile, args: argparse.Namespace) -> None
             1.0 if args.color_auto_exposure else 0.0,
         )
 
-    if not args.color_auto_exposure and args.color_exposure > 0.0:
-        if color_sensor.supports(rs.option.exposure):
-            color_sensor.set_option(rs.option.exposure, float(args.color_exposure))
-        else:
-            print("Warning: color exposure option is not supported.", flush=True)
+    if not args.color_auto_exposure:
+        if args.color_exposure > 0.0:
+            if color_sensor.supports(rs.option.exposure):
+                color_sensor.set_option(rs.option.exposure, float(args.color_exposure))
+            else:
+                print("Warning: color exposure option is not supported.", flush=True)
 
-    if args.color_gain >= 0.0:
-        if color_sensor.supports(rs.option.gain):
-            color_sensor.set_option(rs.option.gain, float(args.color_gain))
-        else:
-            print("Warning: color gain option is not supported.", flush=True)
+        if args.color_gain >= 0.0:
+            if color_sensor.supports(rs.option.gain):
+                color_sensor.set_option(rs.option.gain, float(args.color_gain))
+            else:
+                print("Warning: color gain option is not supported.", flush=True)
 
     exposure_text = "auto"
     gain_text = "unchanged"
