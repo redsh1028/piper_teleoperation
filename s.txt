@@ -1,0 +1,2 @@
+ros2 run vr_udp_bridge lerobot_piper_recorder --ros-args   -p repo_id:=local/piper_teleoperation_video   -p root:=~/lerobot_datasets/test_episode1  -p fps:=15   -p main_image_port:=5020   -p left_wrist_image_port:=5021   -p right_wrist_image_port:=5022   -p use_videos:=true   -p vcodec:=h264   -p task:="put object in box"   -p object_name:="bottle"   -p box_position:="center"   -p start_position:="left"   -p success:=true
+
