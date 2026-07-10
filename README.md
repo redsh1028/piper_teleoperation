@@ -178,7 +178,7 @@ python3 send_realsense_udp.py \
   --stream both
 ```
 
-3대 카메라 동시 송신:
+메인 ZED 2i + wrist RealSense 2대 동시 송신:
 
 ```bash
 ./send_three_realsense_udp.sh --host <ROS_PC_IP>
@@ -187,21 +187,29 @@ python3 send_realsense_udp.py \
 기본 매핑:
 
 ```text
-main        serial=139522076807 port=5020
-left_wrist  serial=116622072176 port=5021
-right_wrist serial=134322071792 port=5022
+main        ZED 2i zed-open-capture, right-half crop, port=5020
+left_wrist  RealSense serial=116622072176, port=5021
+right_wrist RealSense serial=134322071792, port=5022
+```
+
+GPU가 없는 PC에서는 ZED SDK를 사용하지 않고 `zed-open-capture`로 ZED를 엽니다. 처음 설정할 때는 `~/zed-open-capture/udev/99-slabs.rules`를 `/etc/udev/rules.d/`에 설치하고 ZED를 다시 꽂아 USB 권한과 autosuspend 설정을 적용합니다.
+
+`send_zed_open_capture_udp`를 다시 빌드해야 하면:
+
+```bash
+./build_zed_open_capture_sender.sh
 ```
 
 각 UDP packet은 `JSON header + newline + binary payload` 형식입니다. header에는 `magic=RSIMG1`, `frame_id`, `timestamp`, `stream`, `encoding`, `width`, `height`, `chunk_index`, `chunk_count`, `total_size`가 들어갑니다. 수신 측은 같은 `frame_id`와 `stream`의 chunk를 모두 모아 이미지 bytes를 복원하면 됩니다.
 
 ## LeRobotDataset 기록
 
-`lerobot_piper_recorder`는 main/left wrist/right wrist D435 RGB UDP 이미지와 ROS2 Piper/VR 토픽을 받아 LeRobotDataset v3 형식으로 저장합니다. 현재 기본 저장 방식은 MP4 video dataset입니다. 즉 이미지가 `data/*.parquet` 안에 직접 박히는 방식이 아니라, `videos/` 아래 카메라별 MP4로 저장됩니다.
+`lerobot_piper_recorder`는 main ZED 2i RGB UDP 이미지, left/right wrist D435 RGB UDP 이미지와 ROS2 Piper/VR 토픽을 받아 LeRobotDataset v3 형식으로 저장합니다. 현재 기본 저장 방식은 MP4 video dataset입니다. 즉 이미지가 `data/*.parquet` 안에 직접 박히는 방식이 아니라, `videos/` 아래 카메라별 MP4로 저장됩니다.
 
 저장 feature:
 
 ```text
-observation.images.main        : main D435 RGB image
+observation.images.main        : main ZED 2i RGB image
 observation.images.left_wrist  : left wrist RGB image
 observation.images.right_wrist : right wrist RGB image
 observation.state              : left joint1~7 + right joint1~7 feedback
@@ -240,7 +248,7 @@ dataset_root/
 
 `data/*.parquet`에는 state/action/pose/timestamp와 video index가 저장되고, 실제 RGB frame은 `videos/.../*.mp4`에 저장됩니다. `images/` 폴더가 비어 있어도 정상입니다.
 
-1. D435 3대 이미지 송신:
+1. ZED 2i main + D435 wrist 이미지 송신:
 
 ```bash
 ./send_three_realsense_udp.sh --host <ROS_PC_IP>

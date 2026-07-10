@@ -74,6 +74,17 @@ def parse_args() -> argparse.Namespace:
         default=65535,
         help="Maximum UDP datagram size to read",
     )
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Print three-camera receive status without opening an OpenCV window",
+    )
+    parser.add_argument(
+        "--status-interval",
+        type=float,
+        default=1.0,
+        help="Seconds between terminal status updates in --headless mode",
+    )
     return parser.parse_args()
 
 
@@ -237,6 +248,25 @@ def triangle_layout(left, main, right, tile_width: int, tile_height: int):
     return np.vstack((top_row, bottom_row))
 
 
+def format_camera_status(name, state, now: float) -> str:
+    last_received_at = state["last_received_at"]
+    header = state["header"]
+    if last_received_at is None or header is None:
+        return "%s=WAIT" % name
+
+    age_ms = (now - last_received_at) * 1000.0
+    width = int(header.get("width", 0))
+    height = int(header.get("height", 0))
+    fps = state["frames_since_report"] / max(state["report_interval"], 1e-6)
+    return "%s=OK %.1ffps %dx%d age=%.0fms" % (
+        name,
+        fps,
+        width,
+        height,
+        age_ms,
+    )
+
+
 def run_single_view(args: argparse.Namespace) -> None:
     sock = open_socket(args.bind, args.port, args.recv_buffer)
     print("Listening on %s:%d" % (args.bind, args.port), flush=True)
@@ -302,14 +332,27 @@ def run_three_camera_view(args: argparse.Namespace) -> None:
         name: make_placeholder(args.tile_width, args.tile_height, name)
         for name, _ in camera_order
     }
+    status = {
+        name: {
+            "last_received_at": None,
+            "header": None,
+            "frames_since_report": 0,
+            "report_interval": args.status_interval,
+        }
+        for name, _ in camera_order
+    }
     displayed = 0
+    last_status_at = time.monotonic()
 
     print(
         "Listening left=%d main=%d right=%d"
         % (args.left_port, args.main_port, args.right_port),
         flush=True,
     )
-    print("Press q or ESC in the combined window to quit.", flush=True)
+    if args.headless:
+        print("Headless status mode. Press Ctrl+C to quit.", flush=True)
+    else:
+        print("Press q or ESC in the combined window to quit.", flush=True)
 
     try:
         while True:
@@ -330,6 +373,9 @@ def run_three_camera_view(args: argparse.Namespace) -> None:
                 if image is None:
                     continue
                 latest[name] = image
+                status[name]["last_received_at"] = time.monotonic()
+                status[name]["header"] = header
+                status[name]["frames_since_report"] += 1
                 displayed += 1
                 if displayed % 90 == 0:
                     print(
@@ -345,17 +391,33 @@ def run_three_camera_view(args: argparse.Namespace) -> None:
                         flush=True,
                     )
 
-            combined = triangle_layout(
-                latest["left"],
-                latest["main"],
-                latest["right"],
-                args.tile_width,
-                args.tile_height,
-            )
-            cv2.imshow("RealSense UDP wrist pair over main", combined)
-            key_code = cv2.waitKey(1) & 0xFF
-            if key_code in (27, ord("q")):
-                break
+            if args.headless:
+                now = time.monotonic()
+                if now - last_status_at >= args.status_interval:
+                    print(
+                        time.strftime("%H:%M:%S")
+                        + " "
+                        + " | ".join(
+                            format_camera_status(name, status[name], now)
+                            for name, _ in camera_order
+                        ),
+                        flush=True,
+                    )
+                    for camera_state in status.values():
+                        camera_state["frames_since_report"] = 0
+                    last_status_at = now
+            else:
+                combined = triangle_layout(
+                    latest["left"],
+                    latest["main"],
+                    latest["right"],
+                    args.tile_width,
+                    args.tile_height,
+                )
+                cv2.imshow("RealSense UDP wrist pair over main", combined)
+                key_code = cv2.waitKey(1) & 0xFF
+                if key_code in (27, ord("q")):
+                    break
     finally:
         for sock in sockets.values():
             sock.close()

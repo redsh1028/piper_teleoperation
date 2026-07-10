@@ -84,7 +84,7 @@
 # 미리 정의된 USB 포트 정보(bus-info)가 실제 시스템에서 ethtool에서 출력되는 정보와 일치하는지 확인합니다.
 
 # 미리 정의된 CAN 모듈 수
-EXPECTED_CAN_COUNT=4
+EXPECTED_CAN_COUNT=2
 
 if [ "$EXPECTED_CAN_COUNT" -eq 1 ]; then
     # 기본 CAN 이름으로 명령줄 인자를 통해 설정할 수 있습니다
@@ -100,10 +100,8 @@ fi
 # 미리 정의된 USB 포트, 대상 인터페이스 이름 및 비트레이트 (여러 CAN 모듈에서 사용)
 if [ "$EXPECTED_CAN_COUNT" -ne 1 ]; then
     declare -A USB_PORTS 
-    USB_PORTS["3-1.1:1.0"]="can0:1000000"
-    USB_PORTS["3-1.2:1.0"]="can1:1000000"
-    USB_PORTS["3-1.3:1.0"]="can2:1000000"
-    USB_PORTS["3-1.4.1:1.0"]="can3:1000000"    
+    USB_PORTS["1-7:1.0"]="can0:1000000"
+    USB_PORTS["1-8:1.0"]="can1:1000000"
 fi
 
 # 현재 시스템의 CAN 모듈 수 가져오기
@@ -208,7 +206,11 @@ else
         exit 1
     fi
 
-    # 모든 CAN 인터페이스 사이를 옮겨다니기
+    declare -a TEMP_NAMES=()
+    declare -a TARGET_NAMES=()
+
+    # 모든 CAN 인터페이스를 먼저 임시 이름으로 옮겨 이름 충돌을 피합니다.
+    INDEX=0
     for iface in $(ip -br link show type can | awk '{print $1}'); do
         # ethtool을 사용하여 bus- info 가져오기
         BUS_INFO=$(sudo ethtool -i "$iface" | grep "bus-info" | awk '{print $2}')
@@ -232,17 +234,6 @@ else
 
             if [ "$IS_LINK_UP" == "yes" ] && [ "$CURRENT_BITRATE" -eq "$TARGET_BITRATE" ]; then
                 echo "인터페이스 $iface가 활성화되었으며 비트레이트 $TARGET_BITRATE"
-                
-                # 인터페이스 이름이 대상 이름과 일치하는지 검사하기
-                if [ "$iface" != "$TARGET_NAME" ]; then
-                    echo "将接口 $iface 重命名为 $TARGET_NAME"
-                    sudo ip link set "$iface" down
-                    sudo ip link set "$iface" name "$TARGET_NAME"
-                    sudo ip link set "$TARGET_NAME" up
-                    echo "인터페이스는 $TARGET_NAME으로 이름이 변경되고 다시 활성화되었습니다."
-                else
-                    echo "인터페이스 이름이 이미 $TARGET_NAME로 설정되어 있습니다."
-                fi
             else
                 # 인터페이스가 활성화되지 않았거나 비트레이트가 다를 경우
                 if [ "$IS_LINK_UP" == "yes" ]; then
@@ -256,20 +247,28 @@ else
                 sudo ip link set "$iface" type can bitrate $TARGET_BITRATE
                 sudo ip link set "$iface" up
                 echo "인터페이스 $iface가 비트레이트 $TARGET_BITRATE로 재설정되고 활성화되었습니다."
-                
-                # 인터페이스 이름 변경하기
-                if [ "$iface" != "$TARGET_NAME" ]; then
-                    echo "인터페이스 $iface의 이름을 $TARGET_NAME으로 변경합니다."
-                    sudo ip link set "$iface" down
-                    sudo ip link set "$iface" name "$TARGET_NAME"
-                    sudo ip link set "$TARGET_NAME" up
-                    echo "인터페이스는 $TARGET_NAME으로 이름이 변경되고 다시 활성화되었습니다."
-                fi
             fi
+
+            TEMP_NAME="cantmp$INDEX"
+            INDEX=$((INDEX + 1))
+            echo "인터페이스 $iface를 임시 이름 $TEMP_NAME으로 변경합니다."
+            sudo ip link set "$iface" down
+            sudo ip link set "$iface" name "$TEMP_NAME"
+            TEMP_NAMES+=("$TEMP_NAME")
+            TARGET_NAMES+=("$TARGET_NAME")
         else
             echo "오류: 알 수 없는 USB 포트 $BUS_INFO에 대응하는 인터페이스는 $iface 입니다."
             exit 1
         fi
+    done
+
+    for idx in "${!TEMP_NAMES[@]}"; do
+        TEMP_NAME="${TEMP_NAMES[$idx]}"
+        TARGET_NAME="${TARGET_NAMES[$idx]}"
+        echo "인터페이스 $TEMP_NAME의 이름을 $TARGET_NAME으로 변경합니다."
+        sudo ip link set "$TEMP_NAME" name "$TARGET_NAME"
+        sudo ip link set "$TARGET_NAME" up
+        echo "인터페이스는 $TARGET_NAME으로 이름이 변경되고 다시 활성화되었습니다."
     done
 fi
 

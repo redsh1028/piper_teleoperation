@@ -7,12 +7,14 @@ from launch_ros.actions import Node
 def generate_launch_description():
     return LaunchDescription(
         [
-            DeclareLaunchArgument("repo_id", default_value="local/piper_teleoperation"),
+            DeclareLaunchArgument(
+                "repo_id", default_value="local/piper_teleoperation_video"
+            ),
             DeclareLaunchArgument(
                 "root",
-                default_value="~/lerobot_datasets/piper_teleoperation_3cam",
+                default_value="~/lerobot_datasets/cube_task",
             ),
-            DeclareLaunchArgument("fps", default_value="30"),
+            DeclareLaunchArgument("fps", default_value="15"),
             DeclareLaunchArgument("image_bind", default_value="0.0.0.0"),
             DeclareLaunchArgument("image_port", default_value="5020"),
             DeclareLaunchArgument("main_image_port", default_value="5020"),
@@ -20,8 +22,8 @@ def generate_launch_description():
             DeclareLaunchArgument("right_wrist_image_port", default_value="5022"),
             DeclareLaunchArgument("image_width", default_value="640"),
             DeclareLaunchArgument("image_height", default_value="480"),
-            DeclareLaunchArgument("main_image_width", default_value="640"),
-            DeclareLaunchArgument("main_image_height", default_value="480"),
+            DeclareLaunchArgument("main_image_width", default_value="1280"),
+            DeclareLaunchArgument("main_image_height", default_value="720"),
             DeclareLaunchArgument("left_wrist_image_width", default_value="640"),
             DeclareLaunchArgument("left_wrist_image_height", default_value="480"),
             DeclareLaunchArgument("right_wrist_image_width", default_value="640"),
@@ -30,6 +32,8 @@ def generate_launch_description():
                 "task",
                 default_value="teleoperate dual Piper arms",
             ),
+            DeclareLaunchArgument("left_task", default_value=""),
+            DeclareLaunchArgument("right_task", default_value=""),
             DeclareLaunchArgument("object_name", default_value=""),
             DeclareLaunchArgument("box_position", default_value=""),
             DeclareLaunchArgument("start_position", default_value=""),
@@ -80,6 +84,8 @@ def generate_launch_description():
                             "right_wrist_image_height"
                         ),
                         "task": LaunchConfiguration("task"),
+                        "left_task": LaunchConfiguration("left_task"),
+                        "right_task": LaunchConfiguration("right_task"),
                         "object_name": LaunchConfiguration("object_name"),
                         "box_position": LaunchConfiguration("box_position"),
                         "start_position": LaunchConfiguration("start_position"),

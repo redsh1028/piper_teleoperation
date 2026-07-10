@@ -30,16 +30,9 @@ setup(
     entry_points={
         'console_scripts': [
             'udp_to_pose = vr_udp_bridge.udp_to_pose:main',
-            'quest2ros_adapter = vr_udp_bridge.quest2ros_adapter:main',
             'lerobot_piper_recorder = vr_udp_bridge.lerobot_piper_recorder:main',
-            'vr_dual_arm_teleop = vr_udp_bridge.vr_dual_arm_teleop:main',
-            'vr_piper_anchor_teleop = vr_udp_bridge.vr_piper_anchor_teleop:main',
+            'lerobot_piper_smolvla_infer = vr_udp_bridge.lerobot_piper_smolvla_infer:main',
             'vr_piper_joint_ik_axis_gripper_teleop = vr_udp_bridge.vr_piper_joint_ik_axis_gripper_teleop:main',
-            'vr_piper_joint_ik_teleop = vr_udp_bridge.vr_piper_joint_ik_teleop:main',
-            'vr_piper_controller_base = vr_udp_bridge.vr_piper_controller_base:main',
-            'vr_piper_controller_ee = vr_udp_bridge.vr_piper_controller_ee:main',
-            'vr_piper_pose_teleop = vr_udp_bridge.vr_piper_pose_teleop:main',
-            'vr_piper_gazebo_joint_teleop = vr_udp_bridge.vr_piper_gazebo_joint_teleop:main',
         ],
     },
 )

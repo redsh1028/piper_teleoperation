@@ -18,6 +18,7 @@ from geometry_msgs.msg import Pose, PoseStamped
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import JointState, Joy
+from std_msgs.msg import String
 
 
 DEFAULT_PORT = 5020
@@ -242,7 +243,10 @@ class KeyboardReader(threading.Thread):
             return
         self.old_settings = termios.tcgetattr(sys.stdin)
         tty.setcbreak(sys.stdin.fileno())
-        self.logger.info("Keyboard controls: s=start, e=save episode, q=quit")
+        self.logger.info(
+            "Keyboard controls: s=start, e=save episode, "
+            "1/l=left task, 2/r=right task, t=toggle task, q=quit"
+        )
         try:
             while not self.stop_event.is_set():
                 readable, _, _ = select.select([sys.stdin], [], [], 0.1)
@@ -270,6 +274,7 @@ class LeRobotPiperRecorder(Node):
         self.vr_joy = {"left": None, "right": None}
 
         self.recording = False
+        self.episode_task = self.current_task
         self.episode_frames = 0
         self.skip_count = 0
         self.last_missing: Tuple[str, ...] = ()
@@ -294,6 +299,12 @@ class LeRobotPiperRecorder(Node):
 
         self._subscribe_arm("left")
         self._subscribe_arm("right")
+        self.create_subscription(
+            String,
+            "/lerobot_piper_recorder/task_select",
+            self._on_task_select_msg,
+            10,
+        )
         self.timer = self.create_timer(1.0 / self.fps, self._on_timer)
         self.get_logger().info(
             "LeRobot recorder ready: repo_id=%s root=%s fps=%d"
@@ -309,12 +320,12 @@ class LeRobotPiperRecorder(Node):
         )
 
     def _declare_parameters(self) -> None:
-        self.declare_parameter("repo_id", "local/piper_teleoperation")
+        self.declare_parameter("repo_id", "local/piper_teleoperation_video")
         self.declare_parameter(
             "root",
-            os.path.expanduser("~/lerobot_datasets/piper_teleoperation_3cam"),
+            os.path.expanduser("~/lerobot_datasets/cube_task"),
         )
-        self.declare_parameter("fps", 30)
+        self.declare_parameter("fps", 15)
         self.declare_parameter("image_bind", "0.0.0.0")
         self.declare_parameter("image_port", DEFAULT_PORT)
         self.declare_parameter("main_image_port", 5020)
@@ -322,13 +333,15 @@ class LeRobotPiperRecorder(Node):
         self.declare_parameter("right_wrist_image_port", 5022)
         self.declare_parameter("image_width", 640)
         self.declare_parameter("image_height", 480)
-        self.declare_parameter("main_image_width", 640)
-        self.declare_parameter("main_image_height", 480)
+        self.declare_parameter("main_image_width", 1280)
+        self.declare_parameter("main_image_height", 720)
         self.declare_parameter("left_wrist_image_width", 640)
         self.declare_parameter("left_wrist_image_height", 480)
         self.declare_parameter("right_wrist_image_width", 640)
         self.declare_parameter("right_wrist_image_height", 480)
         self.declare_parameter("task", "teleoperate dual Piper arms")
+        self.declare_parameter("left_task", "")
+        self.declare_parameter("right_task", "")
         self.declare_parameter("object_name", "")
         self.declare_parameter("box_position", "")
         self.declare_parameter("start_position", "")
@@ -372,6 +385,19 @@ class LeRobotPiperRecorder(Node):
             ),
         }
         self.task = str(self.get_parameter("task").value)
+        self.left_task = str(self.get_parameter("left_task").value)
+        self.right_task = str(self.get_parameter("right_task").value)
+        self.current_task_label = "task"
+        self.current_task = self.task
+        if self.left_task and self.right_task:
+            self.current_task_label = "right"
+            self.current_task = self.right_task
+        elif self.left_task:
+            self.current_task_label = "left"
+            self.current_task = self.left_task
+        elif self.right_task:
+            self.current_task_label = "right"
+            self.current_task = self.right_task
         self.object_name = str(self.get_parameter("object_name").value)
         self.box_position = str(self.get_parameter("box_position").value)
         self.start_position = str(self.get_parameter("start_position").value)
@@ -610,6 +636,12 @@ class LeRobotPiperRecorder(Node):
                 self._start_episode()
             elif key == "e":
                 self._save_episode()
+            elif key in ("1", "l", "L"):
+                self._select_task("left")
+            elif key in ("2", "r", "R"):
+                self._select_task("right")
+            elif key == "t":
+                self._toggle_task()
             elif key == "q":
                 self.get_logger().info("Quit requested")
                 if self.recording:
@@ -621,45 +653,101 @@ class LeRobotPiperRecorder(Node):
             self.recording = False
             self.get_logger().error("Keyboard command failed: %s" % exc)
 
+    def _on_task_select_msg(self, msg: String) -> None:
+        value = msg.data.strip().lower()
+        try:
+            if value in ("1", "left", "l"):
+                self._select_task("left")
+            elif value in ("2", "right", "r"):
+                self._select_task("right")
+            elif value in ("toggle", "t"):
+                self._toggle_task()
+            else:
+                self.get_logger().warn("Unknown task_select value: %r" % msg.data)
+        except Exception as exc:
+            self.get_logger().error("Task select message failed: %s" % exc)
+
+    def _select_task(self, label: str) -> None:
+        if self.recording:
+            self.get_logger().warn("Recording active; task change ignored")
+            return
+        if label == "left":
+            task = self.left_task
+        elif label == "right":
+            task = self.right_task
+        else:
+            raise ValueError("unknown task label: %s" % label)
+        if not task:
+            self.get_logger().warn("%s_task is empty; task change ignored" % label)
+            return
+        self.current_task_label = label
+        self.current_task = task
+        self.get_logger().warn("Selected %s task: %s" % (label, task))
+
+    def _toggle_task(self) -> None:
+        if self.current_task_label == "left" and self.right_task:
+            self._select_task("right")
+        elif self.left_task:
+            self._select_task("left")
+        else:
+            self.get_logger().warn("No left/right task preset is configured")
+
     def _start_episode(self) -> None:
         if self.recording:
             self.get_logger().warn("Already recording; ignoring start command")
             return
+        self.episode_task = self.current_task
         self.recording = True
         self.episode_frames = 0
         self.skip_count = 0
         self.last_log_time = time.monotonic()
-        self.get_logger().info("Recording started")
+        self.get_logger().info(
+            "Recording started with %s task: %s"
+            % (self.current_task_label, self.episode_task)
+        )
 
     def _save_episode(self) -> None:
         if not self.recording:
             self.get_logger().warn("Not recording; ignoring save command")
             return
-        if self.episode_frames == 0:
-            self.recording = False
-            self.get_logger().warn("Episode has no frames; discarded")
-            self._clear_episode_buffer()
-            return
         self.recording = False
-        frames_to_save = self.episode_frames
-        self.get_logger().info("Saving episode with %d frames" % frames_to_save)
-        episode_index = int(getattr(self.dataset.meta, "total_episodes", 0))
         with self.dataset_lock:
+            frames_to_save = self._episode_buffer_frame_count()
+            if frames_to_save == 0:
+                self.get_logger().warn("Episode has no frames; discarded")
+                self._clear_episode_buffer()
+                self.episode_frames = 0
+                self.skip_count = 0
+                return
+            self.get_logger().info("Saving episode with %d frames" % frames_to_save)
+            episode_index = int(getattr(self.dataset.meta, "total_episodes", 0))
             try:
                 self.dataset.save_episode()
             except TypeError:
-                self.dataset.save_episode(task=self.task)
+                self.dataset.save_episode(task=self.episode_task)
             self._append_episode_metadata(episode_index, frames_to_save)
         self.recording = False
         self.episode_frames = 0
         self.skip_count = 0
         self.get_logger().info("Episode saved")
 
+    def _episode_buffer_frame_count(self) -> int:
+        episode_buffer = getattr(self.dataset, "episode_buffer", None)
+        if isinstance(episode_buffer, dict):
+            size = episode_buffer.get("size")
+            if size is not None:
+                return int(size)
+            frame_index = episode_buffer.get("frame_index")
+            if frame_index is not None:
+                return len(frame_index)
+        return int(self.episode_frames)
+
     def _append_episode_metadata(self, episode_index: int, length: int) -> None:
         metadata = {
             "episode_index": episode_index,
             "length": length,
-            "task": self.task,
+            "task": self.episode_task,
+            "task_label": self.current_task_label,
             "object_name": self.object_name,
             "box_position": self.box_position,
             "start_position": self.start_position,
@@ -674,10 +762,15 @@ class LeRobotPiperRecorder(Node):
 
     def _clear_episode_buffer(self, delete_images: bool = True) -> None:
         with self.dataset_lock:
-            if hasattr(self.dataset, "clear_episode_buffer"):
-                self.dataset.clear_episode_buffer(delete_images=delete_images)
-            elif hasattr(self.dataset, "episode_buffer"):
-                self.dataset.episode_buffer = {}
+            try:
+                if hasattr(self.dataset, "clear_episode_buffer"):
+                    self.dataset.clear_episode_buffer(delete_images=delete_images)
+                elif hasattr(self.dataset, "episode_buffer"):
+                    self.dataset.episode_buffer = {}
+            except Exception as exc:
+                self.get_logger().warn("Failed to clear episode buffer: %s" % exc)
+                if hasattr(self.dataset, "episode_buffer"):
+                    self.dataset.episode_buffer = {}
 
     def _on_timer(self) -> None:
         if not self.recording:
@@ -740,27 +833,26 @@ class LeRobotPiperRecorder(Node):
             return None, tuple(missing)
 
         with self.lock:
-            if (
-                self.joint_state["left"] is None
-                or self.joint_state["right"] is None
-                or self.joint_action["left"] is None
-                or self.joint_action["right"] is None
-            ):
+            if self.joint_state["left"] is None or self.joint_state["right"] is None:
                 if self.joint_state["left"] is None:
                     missing.append("state:left")
                 if self.joint_state["right"] is None:
                     missing.append("state:right")
-                if self.joint_action["left"] is None:
-                    missing.append("action:left")
-                if self.joint_action["right"] is None:
-                    missing.append("action:right")
                 return None, tuple(missing)
+            left_action = (
+                self.joint_action["left"]
+                if self.joint_action["left"] is not None
+                else self.joint_state["left"]
+            )
+            right_action = (
+                self.joint_action["right"]
+                if self.joint_action["right"] is not None
+                else self.joint_state["right"]
+            )
             state = np.concatenate(
                 (self.joint_state["left"], self.joint_state["right"])
             ).astype(np.float32)
-            action = np.concatenate(
-                (self.joint_action["left"], self.joint_action["right"])
-            ).astype(np.float32)
+            action = np.concatenate((left_action, right_action)).astype(np.float32)
             ee_pose = np.concatenate(
                 (
                     self.ee_pose["left"]
@@ -798,7 +890,7 @@ class LeRobotPiperRecorder(Node):
             "observation.images.right_wrist": images["right_wrist"],
             "observation.state": state,
             "action": action,
-            "task": self.task,
+            "task": self.episode_task,
             "observation.ee_pose": ee_pose,
             "observation.vr_pose": vr_pose,
             "observation.vr_joy": vr_joy,

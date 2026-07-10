@@ -23,8 +23,8 @@ def generate_launch_description():
             DeclareLaunchArgument("position_scale", default_value="0.8"),
             DeclareLaunchArgument("orientation_scale", default_value="0.9"),
             DeclareLaunchArgument("publish_rate_hz", default_value="60.0"),
-            DeclareLaunchArgument("position_deadzone", default_value="0.002"),
-            DeclareLaunchArgument("max_target_offset_m", default_value="0.35"),
+            DeclareLaunchArgument("position_deadzone", default_value="0.01"),
+            DeclareLaunchArgument("max_target_offset_m", default_value="0.7"),
             DeclareLaunchArgument("max_joint_step_rad", default_value="0.03"),
             DeclareLaunchArgument("ik_position_weight", default_value="1.0"),
             DeclareLaunchArgument("ik_orientation_weight", default_value="0.6"),
@@ -55,6 +55,15 @@ def generate_launch_description():
             DeclareLaunchArgument("home_button_index", default_value="2"),
             DeclareLaunchArgument("home_both_arms", default_value="false"),
             DeclareLaunchArgument("home_max_step_rad", default_value="0.03"),
+            DeclareLaunchArgument("home_joint_positions", default_value="0,0,0,0,0,0"),
+            DeclareLaunchArgument(
+                "left_home_joint_positions",
+                default_value="0,0.877031988,-1.130597972,0,1.220678788,0",
+            ),
+            DeclareLaunchArgument(
+                "right_home_joint_positions",
+                default_value="0,0.98270774,-1.132569144,0,1.110642036,0",
+            ),
             IncludeLaunchDescription(
                 piper_launch,
                 launch_arguments={
@@ -154,6 +163,15 @@ def generate_launch_description():
                         "home_both_arms": LaunchConfiguration("home_both_arms"),
                         "home_max_step_rad": LaunchConfiguration(
                             "home_max_step_rad"
+                        ),
+                        "home_joint_positions": LaunchConfiguration(
+                            "home_joint_positions"
+                        ),
+                        "left_home_joint_positions": LaunchConfiguration(
+                            "left_home_joint_positions"
+                        ),
+                        "right_home_joint_positions": LaunchConfiguration(
+                            "right_home_joint_positions"
                         ),
                     }
                 ],

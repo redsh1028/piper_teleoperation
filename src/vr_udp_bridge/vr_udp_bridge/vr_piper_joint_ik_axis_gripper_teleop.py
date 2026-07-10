@@ -28,6 +28,9 @@ class VrPiperJointIkAxisGripperTeleop(VrPiperJointIkTeleop):
         self.declare_parameter("home_button_index", 2)
         self.declare_parameter("home_both_arms", True)
         self.declare_parameter("home_max_step_rad", 0.03)
+        self.declare_parameter("home_joint_positions", "0,0,0,0,0,0")
+        self.declare_parameter("left_home_joint_positions", "")
+        self.declare_parameter("right_home_joint_positions", "")
 
         self.gripper_axis_index = int(
             self.get_parameter("gripper_axis_index").value
@@ -60,6 +63,11 @@ class VrPiperJointIkAxisGripperTeleop(VrPiperJointIkTeleop):
         self.home_button_index = int(self.get_parameter("home_button_index").value)
         self.home_both_arms = parse_bool(self.get_parameter("home_both_arms").value)
         self.home_max_step_rad = float(self.get_parameter("home_max_step_rad").value)
+        self.home_joint_positions = self._parse_home_joint_positions(
+            self.get_parameter("home_joint_positions").value
+        )
+        self.left_home_joint_positions = self._home_positions_for_side("left")
+        self.right_home_joint_positions = self._home_positions_for_side("right")
 
         self._validate_axis_gripper_parameters()
         self.get_logger().info(
@@ -94,6 +102,27 @@ class VrPiperJointIkAxisGripperTeleop(VrPiperJointIkTeleop):
             raise ValueError("home_button_index must be -1 or greater")
         if self.home_max_step_rad <= 0.0:
             raise ValueError("home_max_step_rad must be greater than zero")
+        if len(self.home_joint_positions) != 6:
+            raise ValueError("home_joint_positions must contain exactly 6 values")
+        if len(self.left_home_joint_positions) != 6:
+            raise ValueError("left_home_joint_positions must contain exactly 6 values")
+        if len(self.right_home_joint_positions) != 6:
+            raise ValueError("right_home_joint_positions must contain exactly 6 values")
+
+    def _parse_home_joint_positions(self, value):
+        if isinstance(value, str):
+            parts = [part.strip() for part in value.split(",") if part.strip()]
+            if not parts:
+                return []
+            return [float(part) for part in parts]
+        if isinstance(value, (list, tuple)):
+            return [float(part) for part in value]
+        raise ValueError("home_joint_positions must be a comma-separated string")
+
+    def _home_positions_for_side(self, side: str):
+        value = self.get_parameter(f"{side}_home_joint_positions").value
+        positions = self._parse_home_joint_positions(value)
+        return positions if positions else self.home_joint_positions
 
     def _on_joy(self, side: str, msg) -> None:
         super()._on_joy(side, msg)
@@ -278,7 +307,11 @@ class VrPiperJointIkAxisGripperTeleop(VrPiperJointIkTeleop):
             )
             return
 
-        target = [0.0] * len(arm.current_joints)
+        target = (
+            self.left_home_joint_positions
+            if arm.name == "left"
+            else self.right_home_joint_positions
+        )
         command = arm.current_joints.copy()
         for idx, value in enumerate(command):
             delta = target[idx] - float(value)

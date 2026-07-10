@@ -53,9 +53,31 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--v4l2-device",
-        type=int,
-        default=0,
+        default="0",
         help="OpenCV/V4L2 camera index used when --backend v4l2 or auto fallback is active.",
+    )
+    parser.add_argument(
+        "--v4l2-fourcc",
+        default="YUYV",
+        help="FourCC requested for V4L2 capture. Use empty string to leave unchanged.",
+    )
+    parser.add_argument(
+        "--v4l2-max-read-failures",
+        type=int,
+        default=30,
+        help="Consecutive V4L2 read failures before reopening the camera.",
+    )
+    parser.add_argument(
+        "--v4l2-reopen-delay",
+        type=float,
+        default=1.0,
+        help="Seconds to wait before reopening V4L2 after repeated read failures.",
+    )
+    parser.add_argument(
+        "--crop",
+        choices=("none", "left-half", "right-half"),
+        default="none",
+        help="Optional crop applied before encoding. Useful for ZED stereo V4L2 frames.",
     )
     parser.add_argument(
         "--jpeg-quality",
@@ -97,6 +119,18 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=-1.0,
         help="RealSense color gain. Use a higher value if short exposure is too dark.",
+    )
+    parser.add_argument(
+        "--color-auto-white-balance",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable RealSense color auto white balance. Use --no-color-auto-white-balance for fixed color.",
+    )
+    parser.add_argument(
+        "--color-white-balance",
+        type=float,
+        default=-1.0,
+        help="RealSense color white balance in Kelvin when auto white balance is disabled.",
     )
     return parser.parse_args()
 
@@ -248,39 +282,73 @@ def configure_realsense_color_options(profile, args: argparse.Namespace) -> None
             1.0 if args.color_auto_exposure else 0.0,
         )
 
-    if not args.color_auto_exposure and args.color_exposure > 0.0:
-        if color_sensor.supports(rs.option.exposure):
-            color_sensor.set_option(rs.option.exposure, float(args.color_exposure))
-        else:
-            print("Warning: color exposure option is not supported.", flush=True)
+    if not args.color_auto_exposure:
+        if args.color_exposure > 0.0:
+            if color_sensor.supports(rs.option.exposure):
+                color_sensor.set_option(rs.option.exposure, float(args.color_exposure))
+            else:
+                print("Warning: color exposure option is not supported.", flush=True)
 
-    if args.color_gain >= 0.0:
-        if color_sensor.supports(rs.option.gain):
-            color_sensor.set_option(rs.option.gain, float(args.color_gain))
+        if args.color_gain >= 0.0:
+            if color_sensor.supports(rs.option.gain):
+                color_sensor.set_option(rs.option.gain, float(args.color_gain))
+            else:
+                print("Warning: color gain option is not supported.", flush=True)
+
+    if color_sensor.supports(rs.option.enable_auto_white_balance):
+        color_sensor.set_option(
+            rs.option.enable_auto_white_balance,
+            1.0 if args.color_auto_white_balance else 0.0,
+        )
+
+    if not args.color_auto_white_balance and args.color_white_balance > 0.0:
+        if color_sensor.supports(rs.option.white_balance):
+            color_sensor.set_option(rs.option.white_balance, float(args.color_white_balance))
         else:
-            print("Warning: color gain option is not supported.", flush=True)
+            print("Warning: color white balance option is not supported.", flush=True)
 
     exposure_text = "auto"
     gain_text = "unchanged"
+    white_balance_text = "auto"
     if color_sensor.supports(rs.option.exposure):
         exposure_text = "%.1f us" % color_sensor.get_option(rs.option.exposure)
     if color_sensor.supports(rs.option.gain):
         gain_text = "%.1f" % color_sensor.get_option(rs.option.gain)
+    if color_sensor.supports(rs.option.white_balance):
+        white_balance_text = "%.1f K" % color_sensor.get_option(rs.option.white_balance)
     print(
-        "RealSense color exposure: auto=%s exposure=%s gain=%s"
-        % (args.color_auto_exposure, exposure_text, gain_text),
+        "RealSense color exposure: auto=%s exposure=%s gain=%s white_balance_auto=%s white_balance=%s"
+        % (
+            args.color_auto_exposure,
+            exposure_text,
+            gain_text,
+            args.color_auto_white_balance,
+            white_balance_text,
+        ),
         flush=True,
     )
 
 
 def configure_v4l2(args: argparse.Namespace):
-    cap = cv2.VideoCapture(args.v4l2_device, cv2.CAP_V4L2)
+    device = parse_v4l2_device(args.v4l2_device)
+    cap = cv2.VideoCapture(device, cv2.CAP_V4L2)
     if not cap.isOpened():
-        raise RuntimeError("Failed to open V4L2 camera index %d" % args.v4l2_device)
+        raise RuntimeError("Failed to open V4L2 camera %s" % args.v4l2_device)
+    if args.v4l2_fourcc:
+        fourcc = cv2.VideoWriter_fourcc(*args.v4l2_fourcc[:4])
+        cap.set(cv2.CAP_PROP_FOURCC, fourcc)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
     cap.set(cv2.CAP_PROP_FPS, args.fps)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     return cap
+
+
+def parse_v4l2_device(device_text: str):
+    try:
+        return int(device_text)
+    except ValueError:
+        return device_text
 
 
 def encode_color_image(image, jpeg_quality: int) -> Tuple[bytes, Dict[str, object]]:
@@ -299,6 +367,20 @@ def encode_color_image(image, jpeg_quality: int) -> Tuple[bytes, Dict[str, objec
         "height": int(height),
         "format": "bgr8",
     }
+
+
+def crop_image(image, crop: str):
+    if crop == "none":
+        return image
+    height, width = image.shape[:2]
+    half_width = width // 2
+    if half_width <= 0:
+        return image
+    if crop == "left-half":
+        return image[:, :half_width]
+    if crop == "right-half":
+        return image[:, width - half_width :]
+    raise ValueError("Unsupported crop mode: %s" % crop)
 
 
 def encode_color(frame, jpeg_quality: int) -> Tuple[bytes, Dict[str, object]]:
@@ -399,7 +481,7 @@ def main() -> None:
     else:
         cap = configure_v4l2(args)
         print(
-            "V4L2 camera started on index %d." % args.v4l2_device,
+            "V4L2 camera started on %s." % args.v4l2_device,
             flush=True,
         )
     print(
@@ -416,6 +498,7 @@ def main() -> None:
     )
 
     frame_id = 0
+    v4l2_read_failures = 0
     try:
         while True:
             timestamp = time.time()
@@ -423,7 +506,28 @@ def main() -> None:
             if backend == "v4l2":
                 ok, image = cap.read()
                 if not ok:
-                    raise RuntimeError("Failed to read frame from V4L2 camera")
+                    v4l2_read_failures += 1
+                    if v4l2_read_failures == 1 or (
+                        v4l2_read_failures % args.v4l2_max_read_failures == 0
+                    ):
+                        print(
+                            "Warning: failed to read frame from V4L2 camera %s (%d consecutive failures)"
+                            % (args.v4l2_device, v4l2_read_failures),
+                            flush=True,
+                        )
+                    if v4l2_read_failures >= args.v4l2_max_read_failures:
+                        cap.release()
+                        time.sleep(args.v4l2_reopen_delay)
+                        cap = configure_v4l2(args)
+                        print(
+                            "Reopened V4L2 camera %s after read failures."
+                            % args.v4l2_device,
+                            flush=True,
+                        )
+                        v4l2_read_failures = 0
+                    continue
+                v4l2_read_failures = 0
+                image = crop_image(image, args.crop)
                 image_bytes, metadata = encode_color_image(
                     image,
                     args.jpeg_quality,
